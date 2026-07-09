@@ -1,0 +1,22 @@
+[
+  {
+    "name": "John Doe",
+    "id": 1,
+    "role": "Student"
+  },
+  {
+    "name": "Joseph Prince",
+    "id": 2,
+    "role": "Student"
+  },
+  {
+    "name": "Christian Santos",
+    "id": 3,
+    "role": "Teacher"
+  },
+  {
+    "id": 5,
+    "name": "Maria Updated",
+    "role": "Teacher"
+  }
+]
