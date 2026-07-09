@@ -18,5 +18,10 @@
     "id": 5,
     "name": "Maria Updated",
     "role": "Teacher"
+  },
+  {
+    "name": "Kyle Lakes",
+    "id": 6,
+    "role": "Student"
   }
 ]

@@ -3,6 +3,8 @@ import "dotenv/config";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:dns";
+import { rejects } from "node:assert";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,9 +28,56 @@ function sendHTML(res, statuscode, html) {
   res.writeHead(statuscode, { "Content-type": "text/HTML" });
   res.end(html);
 }
+
+function logger(req) {
+  const now = new Date().toLocaleDateString();
+  console.log(`[${now}] ${req.method} ${req.url}`);
+}
+
+function validateUserData(userData) {
+  if (!userData.name || !userData.role) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+function parseBody(req) {
+  return new Promise((resolve, rejects) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+
+    try {
+      req.on("end", () => {
+        const newUserData = JSON.parse(body);
+        resolve(newUserData);
+      });
+    } catch (error) {
+      rejects(error);
+    }
+  });
+
+  req.on("end", (error) => {
+    rejects(error);
+  });
+}
+
+async function sendFile(res, filepath, contentType) {
+  try {
+    const data = await readFile(filepath);
+
+    res.writeHead(200, { "content-type": contentType });
+    res.end(data);
+  } catch (error) {
+    sendHTML(res, 404, "<h1>File Not Found</h1>");
+  }
+}
+
 //creating the server
 const server = http.createServer(async (req, res) => {
-  console.log(req.method, req.url);
+  logger(req);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const parthPart = url.pathname.split("/");
@@ -48,55 +97,46 @@ const server = http.createServer(async (req, res) => {
 
   //Hanndle POST /api/users
   else if (req.method === "POST" && url.pathname === "/api/users") {
-    let body = "";
+    try {
+      const newUserData = await parseBody(req);
 
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-
-    req.on("end", async () => {
-      try {
-        const newUserData = JSON.parse(body);
-
-        if (!newUserData.name || !newUserData.role) {
-          sendJSON(res, 400, { error: "name and role are required fields" });
-          return;
-        }
-
-        const users = await readUsersFromFile();
-
-        const newId =
-          users.length > 0 ? Math.max(...users.map((user) => user.id)) + 1 : 1;
-
-        const newUser = {
-          name: newUserData.name,
-          id: newId,
-          role: newUserData.role,
-        };
-
-        users.push(newUser);
-
-        await saveUser(users);
-
-        sendJSON(res, 201, {
-          message: "User Created Successfully",
-          user: newUser,
-        });
-
-        res.end(
-          JSON.stringify({
-            message: "User Created Successfully",
-            user: newUser,
-          }),
-        );
-        console.log(users);
-      } catch (error) {
-        sendJSON(res, 400, { error: "Invalid JSON data" });
+      if (!validateUserData(newUserData)) {
+        sendJSON(res, 400, { error: "name and role are required fields" });
+        return;
       }
 
-      req.on("error", (err) => {
-        sendJSON(res, 500, { error: "Invalid JSON data" });
+      const users = await readUsersFromFile();
+      const newId =
+        users.length > 0 ? Math.max(...users.map((user) => user.id)) + 1 : 1;
+
+      const newUser = {
+        name: newUserData.name,
+        id: newId,
+        role: newUserData.role,
+      };
+
+      users.push(newUser);
+
+      await saveUser(users);
+
+      sendJSON(res, 201, {
+        message: "User Created Successfully",
+        user: newUser,
       });
+
+      res.end(
+        JSON.stringify({
+          message: "User Created Successfully",
+          user: newUser,
+        }),
+      );
+      console.log(users);
+    } catch (error) {
+      sendJSON(res, 400, { error: "Invalid JSON data" });
+    }
+
+    req.on("error", (err) => {
+      sendJSON(res, 500, { error: "Invalid JSON data" });
     });
   }
 
@@ -107,46 +147,38 @@ const server = http.createServer(async (req, res) => {
     parthPart[2] === "users" &&
     parthPart[3]
   ) {
-    const userId = parseInt(parthPart[3]);
+    try {
+      const userId = parseInt(parthPart[3]);
+      const updatedUserData = await parseBody(req);
 
-    let body = "";
-
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-
-    req.on("end", async () => {
-      try {
-        const updatedUserData = JSON.parse(body);
-
-        if (!updatedUserData.name || !updatedUserData.role) {
-          sendJSON(res, 400, { error: "name and role are required fields" });
-        }
-        const users = await readUsersFromFile();
-
-        const userIndex = users.findIndex((user) => user.id === userId);
-
-        if (userIndex === -1) {
-          sendJSON(res, 404, { error: "User not found" });
-          return;
-        }
-
-        users[userIndex] = {
-          id: userId,
-          name: updatedUserData.name,
-          role: updatedUserData.role,
-        };
-        await saveUser(users);
-        sendJSON(res, 200, {
-          message: "User Updated Successfully",
-          user: users[userIndex],
-        });
-
-        console.log(users);
-      } catch (error) {
-        sendJSON(res, 400, { error: "Invalid JSON data" });
+      if (!validateUserData(updatedUserData)) {
+        sendJSON(res, 400, { error: "name and role are required fields" });
+        return;
       }
-    });
+      const users = await readUsersFromFile();
+
+      const userIndex = users.findIndex((user) => user.id === userId);
+
+      if (userIndex === -1) {
+        sendJSON(res, 404, { error: "User not found" });
+        return;
+      }
+
+      users[userIndex] = {
+        id: userId,
+        name: updatedUserData.name,
+        role: updatedUserData.role,
+      };
+      await saveUser(users);
+      sendJSON(res, 200, {
+        message: "User Updated Successfully",
+        user: users[userIndex],
+      });
+
+      console.log(users);
+    } catch (error) {
+      sendJSON(res, 400, { error: "Invalid JSON data" });
+    }
   }
   //handle DELETE /api/users/:id
   else if (
@@ -197,11 +229,15 @@ const server = http.createServer(async (req, res) => {
   }
   //other routes
   else if (req.method === "GET" && req.url === "/") {
-    sendHTML(res, 200, "<h1>Home Page</h1>");
+    await sendFile(res, join(__dirname, "views", "index.html"), "text/html");
   } else if (req.method === "GET" && req.url === "/about") {
-    sendHTML(res, 200, "<h1>About Page</h1>");
+    await sendFile(res, join(__dirname, "views", "about.html"), "text/html");
   } else if (req.method === "GET" && req.url === "/contact") {
-    sendHTML(res, 200, "<h1>Contact Page</h1>");
+    await sendFile(res, join(__dirname, "views", "contact.html"), "text/html");
+  } else if (req.method === "GET" && req.url == "/css/style.css") {
+    await sendFile(res, join(__dirname,"public", "css", "style.css"), "text/css");
+  } else if (req.method === "GET" && req.url == "/js/main.js") {
+    await sendFile(res, join(__dirname,"public", "js", "main.js"), "text/javascript");
   } else {
     sendHTML(res, 404, "<h1>404 Page Not Found</h1>");
   }
